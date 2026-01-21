@@ -309,7 +309,6 @@ pub enum FlagRefOption<T> {
     Conflict,
     Empty,
     Disabled,
-    Freed,
 }
 
 impl<T> FlagRefOption<T> {
@@ -332,7 +331,6 @@ impl<T> FlagRefOption<T> {
             FlagRefOption::Conflict => FlagRefOption::Conflict,
             FlagRefOption::Empty => FlagRefOption::Empty,
             FlagRefOption::Disabled => FlagRefOption::Disabled,
-            FlagRefOption::Freed => FlagRefOption::Freed
         }
     }
 }
