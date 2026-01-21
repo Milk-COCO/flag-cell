@@ -161,44 +161,88 @@ impl<T> FlagCell<T> {
         Self(InnerFlag(ptr))
     }
     
+    /// 获取当前 [`FlagRef`] 引用数量
     pub fn ref_count(&self) -> isize {
         // 减去自己
         debug_assert!(self.0.ref_count() >= 1);
         self.0.ref_count() - 1
     }
     
+    /// 获取数据是否逻辑启用
     pub fn is_enabled(&self) -> bool {
         self.0.is_enabled()
     }
     
+    /// 将数据逻辑启用
     pub fn enable(&self) -> Option<()> {
         self.0.enable()
     }
     
+    /// 将数据逻辑禁用
+    ///
+    /// 这将禁止所有对应 [`FlagRef`] 使用内部数据，直到调用 [`enable`]
     pub fn disable(&self) -> Option<()> {
         self.0.disable()
     }
     
+    /// Immutably borrows the wrapped value.
+    ///
+    /// The borrow lasts until the returned `Ref` exits scope. Multiple
+    /// immutable borrows can be taken out at the same time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value is currently mutably borrowed. For a non-panicking variant, use
+    /// [`try_borrow`](#method.try_borrow).
+    ///
     pub fn borrow(&self) -> Ref<'_, T> {
         Ref::map(self.deref().borrow(),|md| md.deref())
     }
     
+    /// Mutably borrows the wrapped value.
+    ///
+    /// The borrow lasts until the returned `RefMut` or all `RefMut`s derived
+    /// from it exit scope. The value cannot be borrowed while this borrow is
+    /// active.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value is currently borrowed. For a non-panicking variant, use
+    /// [`try_borrow_mut`](#method.try_borrow_mut).
+    ///
     pub fn borrow_mut(&self) -> RefMut<'_, T> {
         RefMut::map(self.deref().borrow_mut(),|md| md.deref_mut())
     }
     
+    /// Immutably borrows the wrapped value, returning an error if the value is currently mutably
+    /// borrowed.
+    ///
+    /// The borrow lasts until the returned `Ref` exits scope. Multiple immutable borrows can be
+    /// taken out at the same time.
+    ///
+    /// This is the non-panicking variant of [`borrow`](#method.borrow).
+    ///
     pub fn try_borrow(&self) -> Option<Ref<'_, T>> {
         self.deref().try_borrow().ok().map(|r| {
             Ref::map(r, |md| md.deref()) // 解包ManuallyDrop
         })
     }
     
+    /// Mutably borrows the wrapped value, returning an error if the value is currently borrowed.
+    ///
+    /// The borrow lasts until the returned `RefMut` or all `RefMut`s derived
+    /// from it exit scope. The value cannot be borrowed while this borrow is
+    /// active.
+    ///
+    /// This is the non-panicking variant of [`borrow_mut`](#method.borrow_mut).
+    ///
     pub fn try_borrow_mut(&self) -> Option<RefMut<'_, T>> {
         self.deref().try_borrow_mut().ok().map(|r| {
             RefMut::map(r, |md| md.deref_mut()) // 解包ManuallyDrop
         })
     }
     
+    /// Creates a new `FlagCell` containing `value`.
     pub fn new(value: T) -> Self {
         // 对标 std::rc，leak 解放堆内存生命周期，手动管理释放
         Self::from_inner(
@@ -211,11 +255,13 @@ impl<T> FlagCell<T> {
         )
     }
     
+    /// 得到内部[`RefCell`]的引用
     pub fn as_ref_cell_ref(&self) -> &RefCell<ManuallyDrop<T>> {
         // SAFETY：确保正常使用时，FlagCell 存在即数据存在
         unsafe { self.0.as_ref_unchecked() }
     }
     
+    /// 得到内部[`RefCell`]的指针
     pub fn as_ref_cell_ptr(&self) -> *const RefCell<ManuallyDrop<T>> {
         // SAFETY：确保正常使用时，FlagCell 存在即数据存在
         unsafe { self.0.as_ptr_unchecked() }
@@ -303,6 +349,10 @@ impl<T> Deref for FlagCell<T> {
 #[derive(Debug)]
 pub struct FlagRef<T>(InnerFlag<T>);
 
+/// Some: 可借用 <br>
+/// Conflict: 借用冲突，不符合rust借用原则
+/// Empty: 内部为空，即此FlagRef是从new函数创建的
+/// Disabled: 内部数据当前已禁用
 #[derive(Debug)]
 pub enum FlagRefOption<T> {
     Some(T),
@@ -312,6 +362,10 @@ pub enum FlagRefOption<T> {
 }
 
 impl<T> FlagRefOption<T> {
+    /// 解包 FlagRefOption
+    ///
+    /// # Panics
+    /// 若非 `Some` ，panic
     pub fn unwrap(self) -> T {
         if let FlagRefOption::Some(val) = self {
             val
@@ -321,10 +375,14 @@ impl<T> FlagRefOption<T> {
         }
     }
     
+    /// 将自己转换为原生 `Option` 类型
+    ///
+    /// Some转换为Some，其余全部转换为None
     pub fn into_option(self) -> Option<T> {
         self.into()
     }
     
+    /// Maps an `FlagRefOption<T>` to `FlagRefOption<U>` by applying a function to a contained value (为`Some`) or returns 原变体 (非`Some`).
     pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> FlagRefOption<U> {
         match self{
             FlagRefOption::Some(v) => FlagRefOption::Some(f(v)),
@@ -352,7 +410,7 @@ impl<T> FlagRefOption<T> {
 
 impl<T> FlagRef<T> {
     /// 空指针实例
-    /// 抄的std::rc::Weak::new()方法。
+    // 抄的std::rc::Weak::new()方法。
     pub const EMPTY: Self =
         Self( InnerFlag(NonNull::without_provenance(NonZeroUsize::MAX)) );
     
@@ -393,6 +451,9 @@ impl<T> FlagRef<T> {
         FlagRefOption::Some(())
     }
     
+    /// 尝试借用内部值。
+    ///
+    /// 详见 [`FlagRefOption`]
     pub fn try_borrow(&self) -> FlagRefOption<Ref<'_, T>> {
         dangling_then_return!(self.0.inner_ptr().as_ptr(), FlagRefOption::Empty);
         if !self.is_enabled() {
@@ -404,6 +465,9 @@ impl<T> FlagRef<T> {
         FlagRefOption::from_borrow(borrow_unwrapped)
     }
     
+    /// 尝试可变借用内部值。
+    ///
+    /// 详见 [`FlagRefOption`]
     pub fn try_borrow_mut(&self) -> FlagRefOption<RefMut<'_, T>> {
         dangling_then_return!(self.0.inner_ptr().as_ptr(), FlagRefOption::Empty);
         if !self.is_enabled() {
@@ -437,6 +501,9 @@ impl<T> FlagRef<T> {
 }
 
 impl<T> Default for FlagRef<T>{
+    /// 创建一个不指向任何内容的 `FlagRef`
+    ///
+    /// 尝试调用任何方法都将返回 `Empty`
     fn default() -> Self {
         Self::new()
     }
@@ -469,6 +536,7 @@ impl<T> Drop for FlagRef<T> {
 }
 
 impl<T> Clone for FlagRef<T> {
+    /// 克隆一个 FlagRef，使引用计数加一
     fn clone(&self) -> Self {
         self.0.inc_ref_count();
         Self(InnerFlag(self.0.inner_ptr()))
