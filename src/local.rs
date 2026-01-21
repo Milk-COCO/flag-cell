@@ -223,20 +223,12 @@ impl<T> FlagCell<T> {
     
     /// 消费自身，返回内部数据，同时禁用
     ///
-    /// 若当前存在任何引用（包括FlagRef），返还Self
-    ///
-    /// # Panics
-    /// 若内部计数异常，panic。<br>
-    /// 通常是 数据被逻辑禁用 或 内部显示根本不存在 FlagCell 时发生
+    /// 若当前存在任何引用（包括FlagRef），或被异常禁用，返还Self
     ///
     pub fn try_unwrap(self) -> Result<T, Self> {
         let ref_count = self.ref_count();
-        if ref_count > 0 {
+        if !self.is_enabled() || ref_count > 0 {
             return Err(self);
-        }
-        
-        if !self.is_enabled() {
-            panic!("called `FlagCell::try_unwrap()` on a disabled FlagCell");
         }
         
         let r = self.as_ref_cell_ref().try_borrow_mut();
