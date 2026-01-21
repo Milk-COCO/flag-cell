@@ -326,6 +326,16 @@ impl<T> FlagRefOption<T> {
     pub fn into_option(self) -> Option<T> {
         self.into()
     }
+    
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> FlagRefOption<U> {
+        match self{
+            FlagRefOption::Some(v) => FlagRefOption::Some(f(v)),
+            FlagRefOption::Conflict => FlagRefOption::Conflict,
+            FlagRefOption::Empty => FlagRefOption::Empty,
+            FlagRefOption::Disabled => FlagRefOption::Disabled,
+            FlagRefOption::Freed => FlagRefOption::Freed
+        }
+    }
 }
 
 impl<T> From<FlagRefOption<T>> for Option<T> {
