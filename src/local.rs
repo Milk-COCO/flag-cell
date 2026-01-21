@@ -179,6 +179,14 @@ impl<T> FlagCell<T> {
         self.0.disable()
     }
     
+    pub fn borrow(&self) -> Ref<'_, T> {
+        Ref::map(self.deref().borrow(),|md| md.deref())
+    }
+    
+    pub fn borrow_mut(&self) -> RefMut<'_, T> {
+        RefMut::map(self.deref().borrow_mut(),|md| md.deref_mut())
+    }
+    
     pub fn try_borrow(&self) -> Option<Ref<'_, T>> {
         self.deref().try_borrow().ok().map(|r| {
             Ref::map(r, |md| md.deref()) // 解包ManuallyDrop
