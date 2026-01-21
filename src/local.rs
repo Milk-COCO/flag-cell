@@ -277,6 +277,32 @@ impl<T> FlagCell<T> {
     
     /// 消费自身，返回内部数据，同时禁用
     ///
+    /// # Panics
+    /// 若当前存在任何引用（包括FlagRef），或被异常禁用，panic
+    ///
+    pub fn unwrap(self) -> T {
+        let ref_count = self.ref_count();
+        if ref_count > 0 {
+            panic!(
+                "called `FlagCell::unwrap()` on a value with active FlagRef references (ref_count = {})",
+                ref_count
+            );
+        }
+        
+        if !self.is_enabled() {
+            panic!("called `FlagCell::unwrap()` on a disabled FlagCell");
+        }
+        
+        let mut rm = self.as_ref_cell_ref().borrow_mut();
+        self.disable();
+        unsafe {
+            ManuallyDrop::take(rm.deref_mut())
+        }
+        // self 将在此处被drop。
+    }
+    
+    /// 消费自身，返回内部数据，同时禁用
+    ///
     /// 若当前存在任何引用（包括FlagRef），或被异常禁用，返还Self
     ///
     pub fn try_unwrap(self) -> Result<T, Self> {
