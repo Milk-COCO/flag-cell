@@ -162,7 +162,6 @@ impl<T> FlagCell<T> {
     }
     
     pub fn ref_count(&self) -> isize {
-        dangling_then_return!(self.0.inner_ptr().as_ptr(),0);
         // 减去自己
         debug_assert!(self.0.ref_count() >= 1);
         self.0.ref_count() - 1
