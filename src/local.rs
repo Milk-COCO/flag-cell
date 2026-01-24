@@ -1,5 +1,6 @@
 use std::alloc::{dealloc, Layout};
 use std::cell::{Cell, RefCell, RefMut, Ref};
+use std::mem;
 use std::mem::ManuallyDrop;
 use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
@@ -275,10 +276,50 @@ impl<T> FlagCell<T> {
         ref_flag
     }
     
+    
+    /// Replaces the wrapped value with a new one, returning the old value,
+    /// without deinitializing either one.
+    ///
+    /// This function corresponds to [`mem::replace`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value is currently borrowed.
+    ///
+    /// For non-panicking variant , see [`try_replace`](#method.try_replace).
+    ///
+    pub fn replace(self, value: T) -> T {
+        // SAFETY: replace返回所有权，且这个ManuallyDrop马上被丢弃
+        unsafe { ManuallyDrop::take(&mut self.deref().replace(ManuallyDrop::new(value))) }
+    }
+    
+    /// Replaces the wrapped value with a new one, returning the old value,
+    /// without deinitializing either one.
+    ///
+    /// This function corresponds to [`mem::replace`].
+    ///
+    /// 如果当前存在引用，返回None
+    ///
+    /// This is the non-panicking variant of [`replace`](#method.replace).
+    ///
+    pub fn try_replace(self, value: T) -> Option<T> {
+        // SAFETY: replace返回所有权，且这个ManuallyDrop马上被丢弃
+        unsafe {
+            Some(ManuallyDrop::take(
+                &mut mem::replace(
+                    self.deref().try_borrow_mut().ok()?.deref_mut(),
+                    ManuallyDrop::new(value)
+                )
+            ))
+        }
+    }
+    
     /// 消费自身，返回内部数据，同时禁用
     ///
     /// # Panics
-    /// 若当前存在任何引用（包括FlagRef），或被异常禁用，panic
+    /// 若当前存在任何引用（包括FlagRef），或被异常禁用，panic。
+    ///
+    /// For non-panicking variant , see [`try_unwrap`](#method.try_borrow).
     ///
     pub fn unwrap(self) -> T {
         let ref_count = self.ref_count();
@@ -304,6 +345,8 @@ impl<T> FlagCell<T> {
     /// 消费自身，返回内部数据，同时禁用
     ///
     /// 若当前存在任何引用（包括FlagRef），或被异常禁用，返还Self
+    ///
+    /// This is the non-panicking variant of [`unwrap`](#method.unwrap).
     ///
     pub fn try_unwrap(self) -> Result<T, Self> {
         let ref_count = self.ref_count();
@@ -336,8 +379,8 @@ impl<T> Drop for FlagCell<T> {
         let ptr = self.0.inner_ptr();
         
         self.disable();
-        let new_count = self.0.dec_ref_count();
         
+        let new_count = self.0.dec_ref_count();
         if new_count == 0 {
             // SAFETY: 计数0=无其他引用，可以释放。
             // new_count 首次归零意味着，内存未曾释放，这是唯一释放点。
@@ -540,6 +583,7 @@ impl<T> Drop for FlagRef<T> {
     fn drop(&mut self) {
         let ptr = self.0.inner_ptr();
         dangling_then_return!(ptr.as_ptr());
+        
         let new_count = self.0.dec_ref_count();
         if new_count == 0 {
             // SAFETY: 计数0=Cell不存在=无其他引用，指针合法。
