@@ -298,16 +298,21 @@ impl<T> FlagCell<T> {
     ///
     /// This function corresponds to [`mem::replace`].
     ///
-    /// 如果当前存在引用，返回None
+    /// 如果当前存在引用，返回Err返还传入值
     ///
     /// This is the non-panicking variant of [`replace`](#method.replace).
     ///
-    pub fn try_replace(self, value: T) -> Option<T> {
+    pub fn try_replace(self, value: T) -> Result<T,T> {
         // SAFETY: replace返回所有权，且这个ManuallyDrop马上被丢弃
         unsafe {
-            Some(ManuallyDrop::take(
+            Ok(ManuallyDrop::take(
                 &mut mem::replace(
-                    self.deref().try_borrow_mut().ok()?.deref_mut(),
+                    match self.deref().try_borrow_mut() {
+                        Ok(v) => {
+                            v
+                        }
+                        Err(_) => {return Err(value)}
+                    }.deref_mut(),
                     ManuallyDrop::new(value)
                 )
             ))
