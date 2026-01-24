@@ -288,7 +288,7 @@ impl<T> FlagCell<T> {
     ///
     /// For non-panicking variant , see [`try_replace`](#method.try_replace).
     ///
-    pub fn replace(self, value: T) -> T {
+    pub fn replace(&self, value: T) -> T {
         // SAFETY: replace返回所有权，且这个ManuallyDrop马上被丢弃
         unsafe { ManuallyDrop::take(&mut self.deref().replace(ManuallyDrop::new(value))) }
     }
@@ -302,7 +302,7 @@ impl<T> FlagCell<T> {
     ///
     /// This is the non-panicking variant of [`replace`](#method.replace).
     ///
-    pub fn try_replace(self, value: T) -> Result<T,T> {
+    pub fn try_replace(&self, value: T) -> Result<T,T> {
         // SAFETY: replace返回所有权，且这个ManuallyDrop马上被丢弃
         unsafe {
             Ok(ManuallyDrop::take(
