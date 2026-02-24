@@ -2,5 +2,9 @@
 name = "flag-cell"
 version = "0.0.1"
 edition = "2024"
+license = "Apache-2.0"
+description = "An alternative to Rust Rc<RefCell> with exclusive & resurrectable ownership ."
+repository = "https://github.com/Milk-COCO/flag-cell"
+readme = "README.md"
 
 [dependencies]
