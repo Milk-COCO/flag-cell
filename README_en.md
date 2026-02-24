@@ -1,89 +1,119 @@
 # flag-cell
 
-A small Rust crate that provides lightweight single-threaded shared references with logical enable/disable semantics. It exposes the core types `FlagCell`, `FlagRef` and `FlagRefOption`. The implementation in this repository focuses on the single-threaded/local variant (see `src/local.rs`). A synchronized/multi-threaded variant is planned (`src/sync.rs` marked TODO).
+[中文 README](README.md)
 
-For the Chinese documentation, see [`README.md`](./README.md).
+Apache-2.0 Licensed
 
----
+A lightweight Rust crate for managing values with **lightweight reference + logical enable/disable** semantics. It provides two core types: `FlagCell` (the value owner) and `FlagRef` (lightweight shared reference), and implements logical enable/disable and reference count checking without violating memory safety or Rust's borrowing rules.
 
-## Features
+> This crate currently only implements a single-threaded version (`src/local.rs`); `src/sync.rs` is to be implemented.
 
-- Lightweight, cloneable reference type (`FlagRef`) produced from an owning `FlagCell`
-- Logical enable/disable semantics: references cannot access the value while disabled
-- Borrowing API similar to `RefCell` (`borrow`, `borrow_mut`, `try_borrow`, `try_borrow_mut`)
-- Both non-panicking and panicking variants for extracting the value (`try_unwrap`, `unwrap`)
-- Minimal runtime dependencies
+## Key Features
 
-## Usage Scenarios
+- Lightweight shared references: Similar to `Rc<RefCell>` but with **logical enable/disable** semantics. Only one owner (`FlagCell`) is kept, and all other references are weak references (`FlagRef`).
+- Temporarily "logically disable" the hosted data to prevent references from accessing the inner value.
+- `FlagCell` is automatically disabled when dropped, and can be resurrected by any `FlagRef` (only after it has been dropped).
+- Supports safe unwrapping of `FlagCell`.
+- Minimal and compact.
 
-Use `flag-cell` when you need lightweight, single-threaded shared references that can be temporarily disabled for access. Suitable for resource lifecycle control, temporary logical "shutdowns", or as a single-threaded Rc/Weak replacement that can be disabled and re-enabled.
+## When to Use
 
-## Getting Started
+- When you need to restrict data access with a **soft lock / soft disable** (e.g., logically suspending a resource without immediately freeing memory).
+- When you need to detect whether the owner is alive under a single-ownership model.
 
-Add this crate as a git dependency (until published on crates.io):
+## Quick Start
 
+Add this crate as a dependency just like a regular Rust library:
+
+Add to `Cargo.toml` (example):
 ```toml
 [dependencies]
-flag-cell = { git = "https://github.com/Milk-COCO/flag-cell" }
+flag-cell = "0.0.2"
 ```
 
-Example usage:
+Or use commend:
+```bash
+crago add flag-cell
+```
 
+
+Then use it in your code:
 ```rust
-use flag_cell::{FlagCell, FlagRef, FlagRefOption};
+use flag_cell::*;
 
 fn main() {
+    // Create a FlagCell holding the value
     let cell = FlagCell::new(String::from("hello"));
+
+    // Create a lightweight reference (FlagRef) from the FlagCell
     let flag_ref = cell.flag_borrow();
-    println!("Reference count: {}",&flag_ref.ref_count());
-    println!("Enabled: {}",&flag_ref.is_enabled());
 
-    if let Some(borrowed) = cell.try_borrow() {
-        println!("Borrowed: {}",&*borrowed);
-    }
+    // Query reference count and enabled status
+    println!("ref_count: {}", flag_ref.ref_count());
+    println!("is_enabled: {}", flag_ref.is_enabled());
 
+    // Forcibly enable (dangerous, requires unsafe)
+    // unsafe { flag_ref.enable(); } // Returns FlagRefOption<()>
+
+    // When all FlagRefs are dropped (ref count is 0 and not disabled),
+    // you can try to take the inner value.
+    // If there are active references or the cell is disabled, try_unwrap returns Err(self)
     match cell.try_unwrap() {
-        Ok(value) => println!("Unwrapped value: {}", value),
-        Err(_) => println!("Cannot unwrap: cell is disabled or there are active references"),
+        Ok(value) => println!("Extracted value: {}", value),
+        Err(_cell) => println!("Active references exist or disabled, cannot unwrap"),
     }
 
-    // Note: unwrap() will panic if there are active references or if disabled.
+    // Note: Calling unwrap() will panic if there are active references or the cell is disabled
 }
 ```
 
-## API Overview
+## Main API Overview
 
-- `FlagCell<T>`:
-  - `new(value: T)` — Create a new owner cell
-  - `flag_borrow(&self) -> FlagRef<T>` — Create a lightweight reference
-  - `is_enabled()`, `enable()`, `disable()` — Logical enable/disable
-  - `borrow`, `borrow_mut`, `try_borrow`, `try_borrow_mut` — Access value (like RefCell)
-  - `try_unwrap`, `unwrap` — Extract value with/without panicking
+- Exports at crate root
+    - `FlagCell<T>`: The main type that owns the value. Core methods (excerpt):
+        - `FlagCell::new(value: T) -> FlagCell<T>`
+        - `flag_borrow(&self) -> FlagRef<T>`: Creates a `FlagRef`
+        - `ref_count(&self) -> isize`: Returns current reference count (implementation subtracts self; see source for semantics)
+        - `is_enabled(&self) -> bool`
+        - `enable(&self) -> Option<()>` / `disable(&self) -> Option<()>`
+        - `try_unwrap(self) -> Result<T, Self>`: Non-panicking method to take inner value
+        - `unwrap(self) -> T`: Panics if active references exist or disabled
 
-- `FlagRef<T>`:
-  - Cloneable lightweight reference
-  - `ref_count`, `is_enabled`
-  - `try_borrow`, `try_borrow_mut`
-  - Logical (unsafe) enable/disable
+    - `FlagRef<T>`: Lightweight reference created by `FlagCell` (Cloneable). Core methods (excerpt):
+        - `ref_count(&self) -> isize`: Returns reference count (interpretation differs slightly from `FlagCell`; see source)
+        - `is_enabled(&self) -> bool`
+        - `unsafe fn enable(&self) -> FlagRefOption<()>`: Forcibly enables data logically (logically unsafe)
 
-- `FlagRefOption<T>`:
-  - Variants: `Some(T)`, `Conflict`, `Empty`, `Disabled`
-  - Converts to `Option<T>`
+    - `FlagRefOption<T>`: Enum representing the result state of a reference access:
+        - `Some(T)`, `Conflict`, `Empty`, `Disabled`
+        - Implements conversion from `FlagRefOption<T>` to `Option<T>`
 
-## Safety & Notes
+Note: The above API overview is excerpted from the current implementation in `src/local.rs`. For detailed method signatures and behavior (e.g., panic conditions, concurrency safety contracts), see source code comments.
 
-- This crate targets single-threaded use only (see `src/local.rs`).
-- Methods like `FlagRef::enable` are `unsafe` and only change logical state, but can break internal invariants if misused. Know what you're doing before using these strong operations.
-- `unwrap()` panics on active references or when cell is disabled; use `try_unwrap()` for safe extraction.
-- For details on memory management, dropping, and design comments, see the well-commented code in `src/local.rs`.
+## Design & Notes (Key Points from Source)
+
+- `FlagCell::unwrap()` panics if any active `FlagRef` exists (ref_count > 0) or the cell is disabled.
+- `try_unwrap()` provides a non-panicking alternative, returning `Err(self)` for the caller to handle.
+- `FlagRef` provides `unsafe fn enable()`: a **logically unsafe** operation (no memory UB, but may break the type’s logical contract). Use with caution.
+- Drop behavior: Drop logic for `FlagCell` and `FlagRef` is semantically exclusive. The source uses primitives like `ManuallyDrop`, `RefCell`, `Cell<isize>` for manual memory management.
+
+## Examples & Debugging
+
+The source code (`src/local.rs`) includes extensive comments and implementation details. Reading it is recommended to understand:
+
+- How reference counts are tracked (positive/negative values represent enabled/disabled states)
+- The various return states of `FlagRefOption` and conversion rules to `Option`
+- Behavioral differences between `try_unwrap` and `unwrap` under different conditions
+
+## TODO / Future Work
+
+- Implement and fully test a multithreaded / synchronized version (`sync.rs`)
+- Add more examples and documentation
 
 ## Contribution
 
-Contributions and issues are welcome! Typical workflow:
-- Fork this repository and create a new branch
-- Implement your feature or fix and test it
-- Open a pull request describing your change
+PRs and issues are welcome.
 
-## License
+## Contact
 
-Apache License 2.0. See the `LICENSE` file for details.
+See the repository owner profile: [Milk-COCO](https://github.com/Milk-COCO/)
